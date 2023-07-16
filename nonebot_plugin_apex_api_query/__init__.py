@@ -7,7 +7,11 @@ from pathlib import Path
 from httpx import AsyncClient
 from typing import Union
 from .config import Config
+from bs4 import BeautifulSoup
+from datetime import datetime, timezone, timedelta
+import re
 import sqlite3
+import requests
 
 require('nonebot_plugin_apscheduler')
 require('nonebot_plugin_localstore')
@@ -281,6 +285,37 @@ async def t2i(service, response):
     msg = MessageSegment.image(pic)
     return msg
 
+#赛季结束时间以及时间转换函数
+def get_time():
+    url = "https://apex.tracker.gg/"
+    response = requests.get(url)
+    html = response.text
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    title_element = soup.select_one('span[title]')
+    if title_element:
+        title = title_element.get('title')
+    
+        # 剔除时区偏移部分
+        pattern = r'\(.*\)'
+        title = re.sub(pattern, '', title).strip()
+    
+        # 解析时间字符串为datetime对象
+        dt = datetime.strptime(title, "%a %b %d %Y %H:%M:%S GMT%z")
+
+        # 转换为中国标准时间
+        target_tz = timezone(timedelta(hours=8))
+        dt = dt.astimezone(target_tz)
+
+        # 格式化为特定的时间字符串
+        formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        formatted_time = "获取时间失败"
+
+    return formatted_time    
+
+
 # 绑定 UID
 @bind_uid.handle()
 async def bind_uid_func(bot: Bot, event: Union[PrivateMessageEvent, GroupMessageEvent, GuildMessageEvent], uid: Message = CommandArg()):
@@ -408,12 +443,23 @@ class job:
                     await job().add(func=submap, id=(ID + '_map'), hour=None, bot_id=Bot_ID, group_id=ID)
 
 # 处理获取信息
-def process(service, response):
-
+def process(service, response):         
     # 玩家数据
     if service == 'bridge':
         globals = response.json().get('global')
         realtime = response.json().get('realtime')
+        info = response.json().get('legends', {}).get('selected', {}).get('data', [])
+        print(info)
+        info_lines = []
+        for i in range(3):
+            if i < len(info):
+                name = info[i].get('name')
+                value = info[i].get('value')
+                info_lines.append(f'  {name}: {value}')
+            else:
+                break
+        
+        info_str = '\n'.join(info_lines)   
         data = (
             '玩家信息:\n'
             '名称: {}\n'
@@ -421,39 +467,26 @@ def process(service, response):
             '平台: {}\n'
             '等级: {}\n'
             '距下一级百分比: {}%\n'
-            '封禁状态: {}\n'
-            '剩余秒数: {}\n'
-            '最后封禁原因: {}\n'
             '大逃杀分数: {}\n'
             '大逃杀段位: {} {}\n'
+            '击杀器信息：\n'
+               '{}\n'
             '大厅状态: {}\n'
-            '在线: {}\n'
-            '游戏中: {}\n'
-            '可加入: {}\n'
-            '群满员: {}\n'
             '已选传奇: {}\n'
             '当前状态: {}\n'
-            '状态: {}'
             .format(
                 globals.get('name'),
                 globals.get('uid'),
                 globals.get('platform'),
                 globals.get('level'),
                 globals.get('toNextLevelPercent'),
-                convert(globals.get('bans').get('isActive')),
-                globals.get('bans').get('remainingSeconds'),
-                convert(globals.get('bans').get('last_banReason')),
                 globals.get('rank').get('rankScore'),
                 convert(globals.get('rank').get('rankName')),
                 globals.get('rank').get('rankDiv'),
+                info_str ,
                 convert(realtime.get('lobbyState')),
-                convert(realtime.get('isOnline')),
-                convert(realtime.get('isInGame')),
-                convert(realtime.get('canJoin')),
-                convert(realtime.get('partyFull')),
                 convert(realtime.get('selectedLegend')),
                 convert(realtime.get('currentState')),
-                realtime.get('currentStateAsText')
             )
         )
         return data
@@ -493,28 +526,30 @@ def process(service, response):
     # 顶尖猎杀者数据
     elif service == 'predator':
         rp = response.json().get('RP')
+        time = get_time()
         data = (
             '大逃杀:\n'
             'PC 端:\n'
             '顶尖猎杀者人数: {}\n'
-            '顶尖猎杀者分数: {}\n'
+            '顶尖猎杀者最低分数: {}\n'
             '顶尖猎杀者UID: {}\n'
             '大师和顶尖猎杀者人数: {}\n'
             'PS4/5 端:\n'
             '顶尖猎杀者人数: {}\n'
-            '顶尖猎杀者分数: {}\n'
+            '顶尖猎杀者最低分数: {}\n'
             '顶尖猎杀者UID: {}\n'
             '大师和顶尖猎杀者人数: {}\n'
             'Xbox 端:\n'
             '顶尖猎杀者人数: {}\n'
-            '顶尖猎杀者分数: {}\n'
+            '顶尖猎杀者最低分数: {}\n'
             '顶尖猎杀者UID: {}\n'
             '大师和顶尖猎杀者人数: {}\n'
             'Switch 端:\n'
             '顶尖猎杀者人数: {}\n'
-            '顶尖猎杀者分数: {}\n'
+            '顶尖猎杀者最低分数: {}\n'
             '顶尖猎杀者UID: {}\n'
-            '大师和顶尖猎杀者人数: {}'
+            '大师和顶尖猎杀者人数: {}\n'
+            '赛季结束时间：{}'
             .format(
                 rp.get('PC').get('foundRank'),
                 rp.get('PC').get('val'),
@@ -532,6 +567,7 @@ def process(service, response):
                 rp.get('SWITCH').get('val'),
                 rp.get('SWITCH').get('uid'),
                 rp.get('SWITCH').get('totalMastersAndPreds'),
+                time
             )
         )
         return data
