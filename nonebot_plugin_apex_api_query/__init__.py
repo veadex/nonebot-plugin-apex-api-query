@@ -286,7 +286,7 @@ async def t2i(service, response):
     return msg
 
 #赛季结束时间以及时间转换函数
-def get_time():
+async def get_time():
     url = "https://apex.tracker.gg/"
     response = requests.get(url)
     html = response.text
@@ -449,7 +449,6 @@ def process(service, response):
         globals = response.json().get('global')
         realtime = response.json().get('realtime')
         info = response.json().get('legends', {}).get('selected', {}).get('data', [])
-        print(info)
         info_lines = []
         for i in range(3):
             if i < len(info):
